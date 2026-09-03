@@ -34,8 +34,8 @@
             npm-check-updates
             typescript
             typescript-language-server
-            eslint
-            prettier
+            nodePackages.eslint
+            nodePackages.prettier
 
             # General dev utilities
             git
