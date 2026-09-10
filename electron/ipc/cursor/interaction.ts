@@ -240,7 +240,6 @@ function isDuplicateInteractionSample(
 }
 
 export function recordCursorMouseDown(button: 1 | 2 | 3) {
-	console.log("[CursorDebug] recordCursorMouseDown: button =", button, "isActive =", isCursorCaptureActive, "isPaused =", isCursorCapturePaused());
 	if (!isCursorCaptureActive || isCursorCapturePaused()) {
 		return;
 	}
@@ -277,7 +276,6 @@ export function recordCursorMouseDown(button: 1 | 2 | 3) {
 }
 
 export function recordCursorMouseUp() {
-	console.log("[CursorDebug] recordCursorMouseUp: isActive =", isCursorCaptureActive, "isPaused =", isCursorCapturePaused());
 	if (!isCursorCaptureActive || isCursorCapturePaused()) {
 		return;
 	}
@@ -296,19 +294,11 @@ export function recordCursorMouseUp() {
 }
 
 export async function startInteractionCapture() {
-	console.log("[CursorDebug] startInteractionCapture called:", {
-		platform: process.platform,
-		isActive: isCursorCaptureActive,
-		shouldStart: shouldStartGlobalInteractionHook(),
-	});
-
 	if (!isCursorCaptureActive) {
-		console.log("[CursorDebug] startInteractionCapture: skipped (not active)");
 		return;
 	}
 
 	if (!["darwin", "win32", "linux"].includes(process.platform)) {
-		console.log("[CursorDebug] startInteractionCapture: skipped (unsupported platform)");
 		return;
 	}
 
@@ -321,20 +311,11 @@ export async function startInteractionCapture() {
 
 	try {
 		const hook = loadUiohookModule();
-		console.log(
-			"[CursorTelemetry] hook loaded:",
-			!!hook,
-			"has.on:",
-			typeof hook?.on,
-			"has.start:",
-			typeof hook?.start,
-		);
 		if (!isCursorCaptureActive) {
 			return;
 		}
 
 		if (!hook || typeof hook.on !== "function" || typeof hook.start !== "function") {
-			console.log("[CursorTelemetry] hook unusable — aborting interaction capture");
 			return;
 		}
 
@@ -345,8 +326,6 @@ export async function startInteractionCapture() {
 		const onMouseUp = () => {
 			recordCursorMouseUp();
 		};
-
-		let mouseMoveCount = 0;
 
 		const onMouseMove = (event: HookMouseEvent) => {
 			if (!isCursorCaptureActive || isCursorCapturePaused()) {
@@ -365,11 +344,6 @@ export async function startInteractionCapture() {
 			const point = normalizeHookCursorPoint(rawPoint.x, rawPoint.y);
 			pushCursorSample(point.cx, point.cy, getCursorCaptureElapsedMs(), "move");
 
-			mouseMoveCount++;
-			if (mouseMoveCount <= 3 || mouseMoveCount % 200 === 0) {
-				console.log(`[CursorDebug] onMouseMove #${mouseMoveCount}: raw=(${rawPoint.x}, ${rawPoint.y}) normalized=(${point.cx.toFixed(4)}, ${point.cy.toFixed(4)})`);
-			}
-
 			// Also keep the Linux cache fresh so the periodic sampler
 			// (getNormalizedCursorPoint) benefits between mousemove events.
 			if (process.platform === "linux") {
@@ -380,8 +354,6 @@ export async function startInteractionCapture() {
 		hook.on("mousedown", onMouseDown);
 		hook.on("mouseup", onMouseUp);
 		hook.on("mousemove", onMouseMove);
-
-		console.log("[CursorDebug] startInteractionCapture: hook listeners registered, calling hook.start()");
 
 		setInteractionCaptureCleanup(() => {
 			try {
@@ -408,9 +380,7 @@ export async function startInteractionCapture() {
 		});
 
 		hook.start();
-		console.log("[CursorDebug] startInteractionCapture: hook.start() returned successfully");
 	} catch (error) {
-		console.error("[CursorDebug] startInteractionCapture: hook.start() threw error:", error);
 		if (!hasLoggedInteractionHookFailure) {
 			setHasLoggedInteractionHookFailure(true);
 			console.warn("[CursorTelemetry] Global interaction capture unavailable:", error);

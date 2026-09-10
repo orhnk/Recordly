@@ -234,20 +234,6 @@ export function getNormalizedCursorPoint() {
 
 	const result = normalizeCursorScreenPoint(cursor);
 
-	if (activeCursorSamples.length <= 3 || activeCursorSamples.length % 100 === 0) {
-		console.log("[CursorDebug] getNormalizedCursorPoint:", {
-			fallbackCursor,
-			linuxCache: linuxCursorCache
-				? { x: linuxCursorCache.x, y: linuxCursorCache.y, age: Date.now() - linuxCursorCache.updatedAt }
-				: null,
-			isLinuxCacheFresh,
-			usedCache: isLinuxCacheFresh,
-			primarySf,
-			cursorUsed: cursor,
-			result,
-		});
-	}
-
 	return result;
 }
 
@@ -314,29 +300,14 @@ export function pushCursorSample(
 export function sampleCursorPoint() {
 	const point = getNormalizedCursorPoint();
 	pushCursorSample(point.cx, point.cy, getCursorCaptureElapsedMs(), "move");
-
-	if (activeCursorSamples.length <= 3 || activeCursorSamples.length % 100 === 0) {
-		console.log(
-			`[CursorDebug] sampleCursorPoint #${activeCursorSamples.length}: cx=${point.cx.toFixed(4)} cy=${point.cy.toFixed(4)} elapsed=${getCursorCaptureElapsedMs()}ms`,
-		);
-	}
 }
 
 export async function persistPendingCursorTelemetry(videoPath: string) {
 	if (isWebcamVideoPath(videoPath)) {
-		console.log("[CursorDebug] persistPendingCursorTelemetry: skipping webcam path", {
-			videoPath,
-			pendingCount: pendingCursorSamples.length,
-		});
 		await fs.rm(getTelemetryPathForVideo(videoPath), { force: true }).catch(() => {});
 		return;
 	}
 	const telemetryPath = getTelemetryPathForVideo(videoPath);
-	console.log("[CursorDebug] persistPendingCursorTelemetry:", {
-		videoPath,
-		pendingCount: pendingCursorSamples.length,
-		telemetryPath,
-	});
 	if (pendingCursorSamples.length > 0) {
 		await fs.writeFile(
 			telemetryPath,
@@ -352,10 +323,6 @@ export async function persistPendingCursorTelemetry(videoPath: string) {
 }
 
 export function snapshotCursorTelemetryForPersistence() {
-	console.log("[CursorDebug] snapshotCursorTelemetryForPersistence:", {
-		activeCount: activeCursorSamples.length,
-		pendingCount: pendingCursorSamples.length,
-	});
 	if (activeCursorSamples.length === 0) {
 		return;
 	}
@@ -374,10 +341,6 @@ export function snapshotCursorTelemetryForPersistence() {
 
 export function startCursorSampling() {
 	stopCursorCapture();
-	console.log("[CursorDebug] startCursorSampling: beginning periodic sampling", {
-		intervalMs: CURSOR_SAMPLE_INTERVAL_MS,
-		isActive: isCursorCaptureActive,
-	});
 
 	// Wayland/Hyprland: getCursorScreenPoint() returns (0,0) and the X11
 	// uiohook stays silent over native Wayland surfaces, so keep the Linux

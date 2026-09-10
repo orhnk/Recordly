@@ -455,7 +455,7 @@
             cp ${desktopItem}/share/applications/* $out/share/applications/
             for size in 16 24 32 48 64 128 256 512 1024; do
               mkdir -p $out/share/icons/hicolor/''${size}x''${size}/apps
-              cp ./icons/icons/png/''${size}x''${size}.png $out/share/icons/hicolor/''${size}x''${size}/apps/recordly.png
+              cp ${./icons/icons/png}/''${size}x''${size}.png $out/share/icons/hicolor/''${size}x''${size}/apps/recordly.png
             done
           '';
           meta = {

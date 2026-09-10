@@ -30,7 +30,6 @@ let hyprPollInFlight = false;
 let hyprPollConsecutiveFailures = 0;
 let hyprSocketDetectedAtMs = 0;
 let hyprSocketPath: string | null = null;
-let hyprLoggedFirstSample = false;
 
 /**
  * Resolves (and caches for {@link HYPR_SOCKET_DETECT_TTL_MS}) the Hyprland
@@ -72,7 +71,6 @@ export function resetHyprlandCursorStateForTest() {
 	hyprPollConsecutiveFailures = 0;
 	hyprSocketDetectedAtMs = 0;
 	hyprSocketPath = null;
-	hyprLoggedFirstSample = false;
 }
 
 function pollHyprlandCursor(socketPath: string) {
@@ -95,10 +93,6 @@ function pollHyprlandCursor(socketPath: string) {
 
 		if (ok) {
 			hyprPollConsecutiveFailures = 0;
-			if (!hyprLoggedFirstSample) {
-				hyprLoggedFirstSample = true;
-				console.log("[CursorDebug] Hyprland cursor poller: first successful sample");
-			}
 		} else {
 			hyprPollConsecutiveFailures += 1;
 			if (hyprPollConsecutiveFailures === HYPR_POLL_FAILURE_LIMIT) {
@@ -169,7 +163,6 @@ export function startHyprlandCursorPolling(): boolean {
 		return false;
 	}
 
-	console.log("[CursorDebug] Hyprland cursor poller: started", { socketPath });
 	// First sample right away so the cache is warm before the sampler ticks.
 	pollHyprlandCursor(socketPath);
 	hyprPollInterval = setInterval(() => pollHyprlandCursor(socketPath), CURSOR_SAMPLE_INTERVAL_MS);
