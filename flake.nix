@@ -306,11 +306,13 @@
           buildInputs = linuxRuntimeLibs;
 
           dontStrip = true;
+          dontConfigure = true;
           enableParallelBuilding = true;
           dontNpmBuild = true;
           dontNpmPrune = true;
           makeCacheWritable = true;
           npmInstallFlags = [ "--ignore-scripts" "--no-audit" "--no-fund" ];
+          npmRebuildFlags = [ "--ignore-scripts" ];
 
           env = {
             ELECTRON_SKIP_BINARY_DOWNLOAD = "1";
