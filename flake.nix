@@ -297,7 +297,7 @@
           pname = "recordly-unwrapped";
           inherit version;
           src = lib.cleanSource ./.;
-          npmDeps = pkgs.importNpmLock { npmRoot = ./.; };
+          npmDepsHash = "sha256-59EEhe7IuzWqajTxMv+hrxJKiN+0vzNKhpl8hxvNTTU=";
 
           nativeBuildInputs =
             [ nodejs pkgs.python3 pkgs.cmake pkgs.pkg-config pkgs.git ]
