@@ -24,22 +24,16 @@
 #       downloads the official Electron dist zip.
 #
 # Caveats:
-#   * Building still needs network access (npm registry, Electron headers for
-#     the uiohook-napi rebuild, whisper.cpp sources, ffmpeg-static binary), so
-#     Nix's default sandbox blocks it. Build with:
-#         nix build .#recordly --option sandbox false
+#   * The build is pure and runs fully sandboxed (`nix build .#recordly`):
+#     the npm registry is prefetched as a fixed-output `npmDeps`
+#     (`importNpmLock`), the Electron dist/headers come from nixpkgs, the
+#     whisper.cpp source is a `fetchurl` fixed-output input, and
+#     ffmpeg/ffprobe come from nixpkgs instead of the ffmpeg-static network
+#     installer. No `--option sandbox false` is needed.
 #   * `nix run .#recordly` uses the source-built Linux package so the
 #     renderer assets are present. A published AppImage is still exposed as a
 #     separate output, but that release asset currently omits `dist/` and will
 #     not show the UI on its own.
-#   * `nix build .#recordlySource` still runs `npm ci` + `electron-builder`,
-#     both of which download binaries from the network (Electron dist,
-#     whisper.cpp sources, ffmpeg-static, ...). Nix's default sandbox blocks
-#     that, so build with:
-#         nix build .#recordlySource --option sandbox false
-#     (or configure `sandbox = false` in nix.conf if you build often).
-#     Every network step is wrapped in a hard `timeout`, so a flaky network
-#     fails the build loudly instead of hanging it forever.
 #   * The flake pins nixos-unstable so `pkgs.electron_43` exists (Recordly
 #     ships Electron ^43 in package.json). If nixpkgs ever drops electron_43,
 #     the binding falls back to `pkgs.electron` (latest).
@@ -279,11 +273,31 @@
         # with the `dir` electron-builder target (release/linux-unpacked),
         # which avoids the AppImage toolchain/fuse and is directly wrappable
         # for Nix.
+        #
+        # Pure/sandboxed build: every network input is a fixed-output Nix
+        # input, so no `--option sandbox false` is needed:
+        #   * npm registry  -> `npmDeps` via `importNpmLock` (buildNpmPackage
+        #     installs with `npm ci --offline`; the registry is fetched once
+        #     in its own FOD, the main build stays offline).
+        #   * Electron dist/headers -> nixpkgs `${electron}` (`dist` packed
+        #     via `-c.electronDist`, `headers` wired as node-gyp `--nodedir`
+        #     so `install-app-deps` never downloads Electron headers).
+        #   * whisper.cpp   -> `whisperArchive` fetchurl (wired through
+        #     `WHISPER_SRC_ARCHIVE`, see scripts/build-whisper-runtime.mjs).
+        #   * ffmpeg/ffprobe -> nixpkgs `pkgs.ffmpeg` symlinked over the
+        #     ffmpeg-static network installer (the app also falls back to
+        #     `PATH` ffmpeg at runtime, see electron/ipc/ffmpeg/binary.ts).
         # --------------------------------------------------------------------
-        recordlyUnwrapped = pkgs.stdenv.mkDerivation {
+        whisperArchive = pkgs.fetchurl {
+          url = "https://github.com/ggml-org/whisper.cpp/archive/refs/tags/v1.8.4.tar.gz";
+          hash = "sha256-sm8w5SwJXMt12kCxaEN3NmBesoDeVzgYh7+eK2XzHmY=";
+        };
+
+        recordlyUnwrapped = pkgs.buildNpmPackage {
           pname = "recordly-unwrapped";
           inherit version;
           src = lib.cleanSource ./.;
+          npmDeps = pkgs.importNpmLock { npmRoot = ./.; };
 
           nativeBuildInputs =
             [ nodejs pkgs.python3 pkgs.cmake pkgs.pkg-config pkgs.git ]
@@ -291,99 +305,46 @@
 
           buildInputs = linuxRuntimeLibs;
 
-          dontStrip = true; # electron-builder ships pre-stripped binaries
+          dontStrip = true;
           enableParallelBuilding = true;
+          dontNpmBuild = true;
+          dontNpmPrune = true;
+          makeCacheWritable = true;
+          npmInstallFlags = [ "--ignore-scripts" "--no-audit" "--no-fund" ];
 
-          configurePhase = ''
-            runHook preConfigure
-            export HOME="$TMPDIR/home"
-            mkdir -p "$HOME"
-            ${configureNodeCertificateTrust}
-
-            # Impure-but-practical build environment:
-            # * keep npm/electron caches in /tmp so failed/retried builds do not
-            #   re-download hundreds of MB (cleared on reboot, recreated here)
-            # * fail fast on unreachable hosts instead of npm retrying silently
-            #   for tens of minutes
-            # * cap C++ jobs so weak machines don't swap-thrash while compiling
-            #   whisper.cpp
-            export npm_config_cache="/tmp/nix-recordly-cache/npm"
-            export XDG_CACHE_HOME="/tmp/nix-recordly-cache/xdg"
-            export ELECTRON_BUILDER_CACHE="/tmp/nix-recordly-cache/electron-builder"
-            mkdir -p "$npm_config_cache" "$XDG_CACHE_HOME" "$ELECTRON_BUILDER_CACHE"
-
-            export npm_config_fetch_retries=0
-            export npm_config_fetch_timeout=60000
-
-            # The packaged app uses the Electron from nixpkgs (electronDist
-            # below), so never let npm/electron-builder download its own.
-            export ELECTRON_SKIP_BINARY_DOWNLOAD=1
-
-            export jobs="$(nproc)"
-            if [ "$jobs" -gt 4 ]; then jobs=4; fi
-            export CMAKE_BUILD_PARALLEL_LEVEL="$jobs"
-            export npm_config_jobs="$jobs"
-
-            # `npm ci` is scripts-free here, mirroring the Linux CI pipeline
-            # (build.yml uses `npm ci --ignore-scripts`). The repo postinstall
-            # used to download the Electron zip and whisper.cpp sources from
-            # GitHub and could stall indefinitely - that was the hang. Binary
-            # downloads and native rebuilds now run explicitly in buildPhase,
-            # each behind a hard `timeout` so nothing can hang forever again.
-            # npm hides progress bars without a TTY, so print a heartbeat that
-            # shows whether the cache is growing (= downloading) or stalled.
-            echo "npm ci: downloading registry dependencies (heartbeat every 20s)..."
-            timeout 1200 npm ci --ignore-scripts --no-audit --no-fund &
-            npm_pid=$!
-            while kill -0 "$npm_pid" 2>/dev/null; do
-              sleep 20
-              echo "[nix] npm ci still running; npm cache: $(du -sh "$npm_config_cache" 2>/dev/null | cut -f1)"
-            done
-            wait "$npm_pid"
-            echo "npm ci: done."
-            runHook postConfigure
-          '';
+          env = {
+            ELECTRON_SKIP_BINARY_DOWNLOAD = "1";
+          };
 
           buildPhase = ''
             runHook preBuild
             export HOME="$TMPDIR/home"
+            mkdir -p "$HOME"
             ${configureNodeCertificateTrust}
 
-            # Same impure build environment as configurePhase (see above).
-            export npm_config_cache="/tmp/nix-recordly-cache/npm"
-            export XDG_CACHE_HOME="/tmp/nix-recordly-cache/xdg"
-            export ELECTRON_BUILDER_CACHE="/tmp/nix-recordly-cache/electron-builder"
-            mkdir -p "$npm_config_cache" "$XDG_CACHE_HOME" "$ELECTRON_BUILDER_CACHE"
-            export npm_config_fetch_retries=0
-            export npm_config_fetch_timeout=60000
             export ELECTRON_SKIP_BINARY_DOWNLOAD=1
+            export ELECTRON_DIST="${electronDist}"
+            export npm_config_nodedir="${electron.headers}"
+            export WHISPER_SRC_ARCHIVE="${whisperArchive}"
+
             export jobs="$(nproc)"
             if [ "$jobs" -gt 4 ]; then jobs=4; fi
             export CMAKE_BUILD_PARALLEL_LEVEL="$jobs"
             export npm_config_jobs="$jobs"
 
-            # Electron dist provided by nixpkgs (already patched for NixOS).
-            # electron-builder reads it via `electronDist` and never downloads
-            # the official zip. If it complains about a version mismatch with
-            # node_modules/electron, pin `electron` in this flake to the exact
-            # version from package-lock.json.
-            export ELECTRON_DIST="${electronDist}"
+            ln -sf "${pkgs.ffmpeg}/bin/ffmpeg" node_modules/ffmpeg-static/ffmpeg
+            mkdir -p node_modules/ffprobe-static/bin/linux/x64
+            ln -sf "${pkgs.ffmpeg}/bin/ffprobe" node_modules/ffprobe-static/bin/linux/x64/ffprobe
 
-            # Mirrors the Linux CI job in .github/workflows/build.yml:
-            # ffmpeg-static's binary is fetched explicitly (its postinstall
-            # does not run because npm ci was scripts-free)...
-            timeout 600 node node_modules/ffmpeg-static/install.js
-            # ...and uiohook-napi is rebuilt against the pinned Electron.
             rm -rf node_modules/uiohook-napi/build
-            timeout 1200 ./node_modules/.bin/electron-builder install-app-deps
+            ./node_modules/.bin/electron-builder install-app-deps
 
-            # Whisper runtime (downloads whisper.cpp sources, cmake build).
-            timeout 1800 npm run build:platform-native-helpers
+            npm run build:platform-native-helpers
             ./node_modules/.bin/tsc
             ./node_modules/.bin/vite build --config vite.config.ts
             npm run normalize:electron-main-cjs
             npm run smoke:electron-main-cjs
-            timeout 1200 ./node_modules/.bin/electron-builder --linux dir --publish never -c.electronDist="$ELECTRON_DIST"
+            ./node_modules/.bin/electron-builder --linux dir --publish never -c.electronDist="$ELECTRON_DIST"
             runHook postBuild
           '';
 
@@ -421,7 +382,7 @@
         # by hand.
         recordly = pkgs.buildFHSEnv {
           name = "recordly";
-          targetPkgs = pkgs': [ recordlyUnwrapped ] ++ linuxRuntimeLibs;
+          targetPkgs = pkgs': [ recordlyUnwrapped pkgs.ffmpeg ] ++ linuxRuntimeLibs;
           runScript = ''
             # Host sessions can leak environment that breaks the packaged app:
             #

@@ -309,6 +309,12 @@ async function ensureSourceTree() {
 	await rm(extractRoot, { recursive: true, force: true });
 	await mkdir(extractRoot, { recursive: true });
 
+	const prefetchedArchive = process.env.WHISPER_SRC_ARCHIVE;
+	if (prefetchedArchive && existsSync(prefetchedArchive)) {
+		console.log(`[build-whisper-runtime] Using prefetched whisper.cpp source: ${prefetchedArchive}`);
+		await cp(prefetchedArchive, archivePath);
+	}
+
 	if (!existsSync(archivePath)) {
 		console.log(`[build-whisper-runtime] Downloading whisper.cpp ${whisperVersion} source...`);
 		await downloadFile(getSourceArchiveUrl(), archivePath);
