@@ -378,6 +378,21 @@
           };
         };
 
+        # --------------------------------------------------------------------
+        # Desktop entry: `electron-builder --linux dir` produces no .desktop
+        # file or icons, so the app never shows up in launchers after
+        # `nixos-rebuild` / home-manager. Provide both via the FHS wrapper.
+        # --------------------------------------------------------------------
+        desktopItem = pkgs.makeDesktopItem {
+          name = "recordly";
+          exec = "recordly %U";
+          icon = "recordly";
+          desktopName = "Recordly";
+          comment = "Creator-focused screen recorder with auto-zoom, cursor effects and editing";
+          categories = [ "AudioVideo" ];
+          startupWMClass = "Recordly";
+        };
+
         # FHS wrapper: gives the bundled Electron binary a complete runtime
         # environment (GTK, NSS, ALSA, PulseAudio, X11, GL, xdg-utils for
         # shell.openExternal, ...) without chasing transitive library paths
@@ -434,6 +449,14 @@
             # ignored), so the X11 compatibility layer is not required;
             # gpuSwitches.ts still selects use-gl=egl for X11 sessions.
             exec recordly --no-sandbox "$@"
+          '';
+          extraInstallCommands = ''
+            mkdir -p $out/share/applications
+            cp ${desktopItem}/share/applications/* $out/share/applications/
+            for size in 16 24 32 48 64 128 256 512 1024; do
+              mkdir -p $out/share/icons/hicolor/''${size}x''${size}/apps
+              cp ./icons/icons/png/''${size}x''${size}.png $out/share/icons/hicolor/''${size}x''${size}/apps/recordly.png
+            done
           '';
           meta = {
             description = "Recordly – free, creator-focused screen recorder with auto-zoom, cursor effects, backgrounds, annotations, and editing";
